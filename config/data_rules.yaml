@@ -1,0 +1,59 @@
+# Data quality rules for transactions_YYYYMMDD.csv
+# Business decisions live here, not in code. Change a rule, then rerun the affected dates.
+# Every run records `version` and a hash of this file in its audit log.
+version: 1
+
+# File-level checks: any failure fails the DAG run and raises an alert
+file_checks:
+  min_size_bytes: 50
+  require_data_rows: true
+
+# Column contract with the source system, chosen by the date in the file name.
+# A missing required column or an unknown column fails the run for manual review.
+schema_contracts:
+  - version: v1
+    effective_from: "2026-06-01"
+    required: [transaction_id, transaction_time, amount, status]
+    optional: [customer_id]
+  - version: v2
+    # currency first appeared in 2026-06-03; adopted after manual review
+    effective_from: "2026-06-03"
+    required: [transaction_id, transaction_time, amount, status, currency]
+    optional: [customer_id]
+
+# Accepted timestamp formats; values are normalized to YYYY-MM-DD HH:MM:SS
+transaction_time:
+  formats:
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y/%m/%d %H:%M:%S"
+
+status:
+  allowed:
+    - SUCCESS
+
+currency:
+  allowed:
+    - TWD
+  # Applied when the file has no currency column (contract v1)
+  default: TWD
+
+# Transaction dates accepted in file X: from X-2 to X; anything else is quarantined
+late_arrival:
+  max_days_before_file_date: 2
+  allow_future_dates: false
+
+# Each run recomputes the dates it touches plus this many prior trading days
+# (a trading day is a date with at least one counted transaction)
+lookback:
+  trading_days: 2
+
+# Counted as normal, but recorded and reported for review
+flags:
+  negative_amount: true
+  zero_amount: true
+  missing_customer_id: true
+
+# How long to wait for the source file before failing the run
+file_sensor:
+  poke_interval_seconds: 300
+  timeout_seconds: 7200
