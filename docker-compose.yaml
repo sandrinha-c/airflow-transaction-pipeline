@@ -57,21 +57,14 @@ services:
     restart: always
 
   # 開幕前的佈置：建立資料庫表格與登入帳號，完成後就結束
+  # 使用官方映像檔內建的初始化程序（透過 _AIRFLOW_* 環境變數控制）
   airflow-init:
     <<: *airflow-common
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        mkdir -p /opt/airflow/logs /opt/airflow/data
-        airflow db migrate
-        airflow users create \
-          --username "$${_AIRFLOW_WWW_USER_USERNAME}" \
-          --password "$${_AIRFLOW_WWW_USER_PASSWORD}" \
-          --firstname Admin --lastname User \
-          --role Admin --email admin@example.com || true
+    command: version
     environment:
       <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: airflow
       _AIRFLOW_WWW_USER_PASSWORD: airflow
     restart: "no"
