@@ -1,0 +1,14 @@
+# 與作業無關的個人文件（104 測評說明、個資告知）
+*.pdf
+
+# 原始壓縮檔（已解壓至 sample_data/）
+sample_data.zip
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Airflow 執行產生的檔案
+logs/
+.env

@@ -1,0 +1,5 @@
+# 文字檔一律用 LF 換行（Airflow 在 Linux 容器中執行）
+* text=auto eol=lf
+
+# CSV 保持原始位元組不轉換：檔案大小是資料品質檢查的一部分（file_size >= 50 bytes）
+*.csv -text
