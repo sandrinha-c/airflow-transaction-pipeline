@@ -6,6 +6,11 @@
 #   3. docker compose up -d                    # 啟動 webserver 與 scheduler
 #   4. 瀏覽器打開 http://localhost:8080        # 帳號 / 密碼：airflow / airflow
 
+# ---------------------------------------------------------------------------
+# 共用設定：init、webserver、scheduler 都是 Airflow，用同一個 image 與相同設定。
+# &airflow-common 幫這段設定取名字（像宣告變數），下面用 <<: *airflow-common 引用。
+# 等同 Python：webserver = {**airflow_common, "command": "webserver"}
+# ---------------------------------------------------------------------------
 x-airflow-common: &airflow-common
   # 固定版本，確保每個人跑出來的環境都一樣
   image: apache/airflow:2.10.5-python3.11
@@ -13,10 +18,9 @@ x-airflow-common: &airflow-common
   environment: &airflow-common-env
     # LocalExecutor：task 在 scheduler 所在的機器上執行，適合單機作業，不需要 Redis / Celery
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # 記事本（postgres）的連線位址：帳號 airflow、密碼 airflow、主機 postgres、資料庫 airflow
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    # 開啟 scheduler 健康檢查端點（port 8974），docker 用它判斷 scheduler 是否正常
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
     # 新的 DAG 預設為暫停，避免一放進來就自動補跑所有歷史日期
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     # 題目的時間都是 UTC+8，排程與介面都用台北時間顯示
@@ -35,9 +39,6 @@ x-airflow-common: &airflow-common
     - ./data:/opt/airflow/data
     - ./sample_data:/opt/airflow/sample_data:ro
     - ./logs:/opt/airflow/logs
-  depends_on: &airflow-common-depends-on
-    postgres:
-      condition: service_healthy
 
 services:
   # 記事本：記錄每個 DAG、每次執行、每個 task 的狀態
@@ -49,24 +50,28 @@ services:
       POSTGRES_DB: airflow
     volumes:
       - postgres-db:/var/lib/postgresql/data
+    # 健康檢查：每 10 秒問一次「資料庫可以連線了嗎？」
+    # 其他服務靠這個判斷 postgres 是否準備好（service_healthy）
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
-      start_period: 5s
     restart: always
 
   # 開幕前的佈置：建立資料庫表格與登入帳號，完成後就結束
-  # 使用官方映像檔內建的初始化程序（透過 _AIRFLOW_* 環境變數控制）
+  # 使用官方 image 內建的初始化程序（透過 _AIRFLOW_* 環境變數控制）
   airflow-init:
     <<: *airflow-common
     command: version
     environment:
-      <<: *airflow-common-env
+      <<: *airflow-common-env          # 先放入共用的環境變數，再加上 init 專用的
       _AIRFLOW_DB_MIGRATE: "true"
       _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: airflow
       _AIRFLOW_WWW_USER_PASSWORD: airflow
+    depends_on:
+      postgres:
+        condition: service_healthy     # 等記事本準備好
     restart: "no"
 
   # 監視器：網頁介面
@@ -74,34 +79,25 @@ services:
     <<: *airflow-common
     command: webserver
     ports:
-      - "8080:8080"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: always
+      - "8080:8080"                    # 你的電腦的 8080 : container 裡的 8080
     depends_on:
-      <<: *airflow-common-depends-on
+      postgres:
+        condition: service_healthy                 # 等記事本準備好
       airflow-init:
-        condition: service_completed_successfully
+        condition: service_completed_successfully  # 等佈置完成
+    restart: always
 
   # 鬧鐘 + 工頭：時間到了就啟動 task，並在本機執行（LocalExecutor）
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: always
     depends_on:
-      <<: *airflow-common-depends-on
+      postgres:
+        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    restart: always
 
+# 記事本的資料存放處：由 Docker 管理，container 關掉也不會消失（除非 docker compose down -v）
 volumes:
   postgres-db:
