@@ -1,0 +1,114 @@
+# Airflow 2.x 執行環境（LocalExecutor + PostgreSQL）
+#
+# 啟動方式：
+#   1. echo "AIRFLOW_UID=$(id -u)" > .env     # 讓容器寫出的檔案屬於目前使用者（Linux / Codespace）
+#   2. docker compose up airflow-init          # 第一次：建立資料庫與登入帳號
+#   3. docker compose up -d                    # 啟動 webserver 與 scheduler
+#   4. 瀏覽器打開 http://localhost:8080        # 帳號 / 密碼：airflow / airflow
+
+x-airflow-common: &airflow-common
+  # 固定版本，確保每個人跑出來的環境都一樣
+  image: apache/airflow:2.10.5-python3.11
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment: &airflow-common-env
+    # LocalExecutor：task 在 scheduler 所在的機器上執行，適合單機作業，不需要 Redis / Celery
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # 開啟 scheduler 健康檢查端點（port 8974），docker 用它判斷 scheduler 是否正常
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # 新的 DAG 預設為暫停，避免一放進來就自動補跑所有歷史日期
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+    # 題目的時間都是 UTC+8，排程與介面都用台北時間顯示
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Taipei
+    AIRFLOW__WEBSERVER__DEFAULT_UI_TIMEZONE: Asia/Taipei
+    # 讓 DAG 可以 import pipeline/ 裡的處理邏輯
+    PYTHONPATH: /opt/airflow
+    # 專案自訂的路徑設定，處理邏輯透過環境變數取得，不寫死在程式裡
+    PIPELINE_DATA_DIR: /opt/airflow/data
+    PIPELINE_CONFIG_PATH: /opt/airflow/config/data_rules.yaml
+  volumes:
+    # 左邊是專案資料夾，右邊是容器內的位置；在專案裡改檔案，容器內立即看得到
+    - ./dags:/opt/airflow/dags
+    - ./pipeline:/opt/airflow/pipeline
+    - ./config:/opt/airflow/config
+    - ./data:/opt/airflow/data
+    - ./sample_data:/opt/airflow/sample_data:ro
+    - ./logs:/opt/airflow/logs
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  # 記事本：記錄每個 DAG、每次執行、每個 task 的狀態
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # 開幕前的佈置：建立資料庫表格與登入帳號，完成後就結束
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        mkdir -p /opt/airflow/logs /opt/airflow/data
+        airflow db migrate
+        airflow users create \
+          --username "$${_AIRFLOW_WWW_USER_USERNAME}" \
+          --password "$${_AIRFLOW_WWW_USER_PASSWORD}" \
+          --firstname Admin --lastname User \
+          --role Admin --email admin@example.com || true
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_WWW_USER_USERNAME: airflow
+      _AIRFLOW_WWW_USER_PASSWORD: airflow
+    restart: "no"
+
+  # 監視器：網頁介面
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  # 鬧鐘 + 工頭：時間到了就啟動 task，並在本機執行（LocalExecutor）
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-db:
