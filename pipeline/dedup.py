@@ -1,7 +1,7 @@
 """Duplicate and conflict detection across every file received so far.
 
 transaction_id is assumed to be globally unique (see DATA_OBSERVATION.md, assumption 4).
-When the same id appears more than once, the versions are compared after normalization.
+When the same id appears more than once, its records are compared after normalization.
 """
 from __future__ import annotations
 
@@ -16,17 +16,37 @@ VALUE_CONFLICT = "value_conflict"
 ID_COLLISION = "id_collision"
 
 
-def classify_versions(versions: list[dict]) -> str:
-    """Classify all staged versions of one transaction_id.
+def classify_same_id_records(records: list[dict]) -> str:
+    """Classify all staged records that share one transaction_id.
 
-    Each version is a dict with at least IDENTITY_FIELDS and VALUE_FIELDS.
+    Each record is a dict with at least IDENTITY_FIELDS and VALUE_FIELDS.
 
     Returns:
-        UNIQUE          only one version
-        DUPLICATE       every version is identical on IDENTITY_FIELDS and VALUE_FIELDS
+        UNIQUE          only one record
+        DUPLICATE       every record is identical on IDENTITY_FIELDS and VALUE_FIELDS
         VALUE_CONFLICT  identity fields all match, but some value field differs
                         (e.g. TXN0011: same customer and time, amount 1100 vs 1200)
         ID_COLLISION    some identity field differs: likely two different transactions
                         sharing one id
     """
-    raise NotImplementedError("TODO: implement classify_versions (see tests/test_dedup.py)")
+    if len(records)== 1:
+        return UNIQUE
+    
+    first = records[0]
+        
+    for record in records[1:]:
+        for field in IDENTITY_FIELDS:
+            if record[field] != first[field]:
+                return ID_COLLISION
+
+    for record in records[1:]:
+        for field in VALUE_FIELDS:
+            if record[field] != first[field]:
+                return VALUE_CONFLICT
+
+    return DUPLICATE
+
+    
+            
+
+    

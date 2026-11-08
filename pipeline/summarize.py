@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from pipeline.clean import write_csv
-from pipeline.dedup import DUPLICATE, ID_COLLISION, UNIQUE, VALUE_CONFLICT, classify_versions
+from pipeline.dedup import DUPLICATE, ID_COLLISION, UNIQUE, VALUE_CONFLICT, classify_same_id_records
 from pipeline.settings import Paths, rules_fingerprint
 
 SUMMARY_FIELDS = ["transaction_date", "transaction_count", "total_amount"]
@@ -52,17 +52,17 @@ def resolve(records: list[dict], rules: dict) -> tuple[dict, list[dict]]:
     conflicts: list[dict] = []
     allowed_status = set(rules["status"]["allowed"])
 
-    for transaction_id, versions in by_id.items():
-        kind = UNIQUE if len(versions) == 1 else classify_versions(versions)
+    for transaction_id, same_id in by_id.items():
+        kind = UNIQUE if len(same_id) == 1 else classify_same_id_records(same_id)
         if kind in (VALUE_CONFLICT, ID_COLLISION):
-            for v in versions:
+            for v in same_id:
                 dispositions[row_key(v)] = CONFLICT
                 conflicts.append({**{k: v[k] for k in CONFLICT_FIELDS if k in v}, "kind": kind})
             continue
         if kind not in (UNIQUE, DUPLICATE):
-            raise ValueError(f"classify_versions returned unexpected value {kind!r} for {transaction_id}")
-        # Keep the earliest received version; later identical copies are duplicates
-        first, *rest = versions
+            raise ValueError(f"classify_same_id_records returned unexpected value {kind!r} for {transaction_id}")
+        # Keep the earliest received record; later identical copies are duplicates
+        first, *rest = same_id
         for v in rest:
             dispositions[row_key(v)] = DEDUPLICATED
         dispositions[row_key(first)] = COUNTED if first["status"] in allowed_status else NON_SUCCESS
@@ -136,7 +136,7 @@ def build_summary(paths: Paths, file_date: date, rules: dict, run_id: str) -> di
     if not reconciliation["balanced"]:
         raise ReconciliationError(f"rows_read={meta['data_rows']} but rows accounted for={accounted}: {buckets}")
 
-    # 2. Affected dates: dates touched by this file (including other versions of its ids)
+    # 2. Affected dates: dates touched by this file (including other records with the same ids)
     #    plus the previous N trading days
     current_ids = {r["transaction_id"] for r in current}
     involved = {r["transaction_date"] for r in records if r["transaction_id"] in current_ids}
