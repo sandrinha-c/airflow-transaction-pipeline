@@ -1,0 +1,2 @@
+flag,file_date,row_number,transaction_id,transaction_date,amount,customer_id
+zero_amount,2026-06-03,6,TXN0015,2026-06-03,0,C002

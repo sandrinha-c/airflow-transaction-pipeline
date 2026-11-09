@@ -1,0 +1,2 @@
+file_date,row_number,transaction_id,reason,detail,raw
+2026-06-02,3,TXN0008,missing_amount,amount is empty,"{""transaction_id"": ""TXN0008"", ""customer_id"": ""C006"", ""transaction_time"": ""2026-06-02 09:00:00"", ""amount"": """", ""status"": ""SUCCESS""}"

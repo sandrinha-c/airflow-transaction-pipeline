@@ -1,0 +1,3 @@
+file_date,row_number,transaction_id,reason,detail,raw
+2026-06-03,5,TXN0014,invalid_transaction_time,cannot parse '2026-13-03 10:00:00',"{""transaction_id"": ""TXN0014"", ""customer_id"": ""C010"", ""transaction_time"": ""2026-13-03 10:00:00"", ""amount"": ""350"", ""status"": ""SUCCESS"", ""currency"": ""TWD""}"
+2026-06-03,7,TXN0016,currency_not_allowed,USD is not in ['TWD'],"{""transaction_id"": ""TXN0016"", ""customer_id"": ""C011"", ""transaction_time"": ""2026-06-03 13:20:00"", ""amount"": ""25"", ""status"": ""SUCCESS"", ""currency"": ""USD""}"

@@ -1,0 +1,3 @@
+transaction_id,kind,file_date,row_number,customer_id,transaction_time,amount,currency,status
+TXN0011,value_conflict,2026-06-02,7,C008,2026-06-02 15:45:00,1100,TWD,SUCCESS
+TXN0011,value_conflict,2026-06-03,4,C008,2026-06-02 15:45:00,1200,TWD,SUCCESS

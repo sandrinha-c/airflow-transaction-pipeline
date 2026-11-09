@@ -1,0 +1,59 @@
+{
+  "run_id": "backfill__2026-06-01T16:30:00+00:00",
+  "file_date": "2026-06-02",
+  "generated_at": "2026-11-08T19:08:17+00:00",
+  "rules": {
+    "version": 1,
+    "fingerprint": "652d22d38f44"
+  },
+  "source": {
+    "file": "transactions_20260602.csv",
+    "size_bytes": 336,
+    "sha256": "909d7cae00bd953b5da72f7f37759a35e0e2438a4acdebba3d97ad7b342bbc81",
+    "contract_version": "v1",
+    "data_rows": 6
+  },
+  "archived_previous_version": null,
+  "reconciliation": {
+    "rows_read": 6,
+    "row_quarantined": 1,
+    "counted": 3,
+    "deduplicated": 1,
+    "conflict_quarantined": 0,
+    "non_success": 1,
+    "balanced": true
+  },
+  "row_quarantine_reasons": {
+    "missing_amount": 1
+  },
+  "conflicts_involving_this_file": [],
+  "flags": {},
+  "affected_dates": [
+    "2026-06-01",
+    "2026-06-02"
+  ],
+  "lookback_dates": [
+    "2026-06-01"
+  ],
+  "summary_changes": [
+    {
+      "transaction_date": "2026-06-01",
+      "before": {
+        "transaction_count": "5",
+        "total_amount": "2600"
+      },
+      "after": {
+        "transaction_count": "6",
+        "total_amount": "3050"
+      }
+    },
+    {
+      "transaction_date": "2026-06-02",
+      "before": null,
+      "after": {
+        "transaction_count": "2",
+        "total_amount": "1800"
+      }
+    }
+  ]
+}
