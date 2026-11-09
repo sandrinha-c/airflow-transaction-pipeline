@@ -153,6 +153,44 @@ class RuleTest(PipelineTestCase):
         self.assertEqual(saved["source"]["sha256"], audit["source"]["sha256"])
         self.assertEqual(saved["rules"]["fingerprint"], audit["rules"]["fingerprint"])
 
+    def test_rerun_with_same_run_id_keeps_both_snapshots(self):
+        first = self.run_date("2026-06-01", run_id="same")
+        second = self.run_date("2026-06-01", run_id="same")
+        self.assertNotEqual(first["audit_path"], second["audit_path"])
+        self.assertTrue(Path(first["audit_path"]).exists())
+        self.assertTrue(Path(second["audit_path"]).exists())
+
+    HEADER = "transaction_id,customer_id,transaction_time,amount,status,currency\n"
+
+    def test_non_finite_amounts_are_quarantined(self):
+        self.write_incoming("20260610", self.HEADER +
+                            "TXN1,C1,2026-06-10 10:00:00,NaN,SUCCESS,TWD\n"
+                            "TXN2,C1,2026-06-10 10:00:00,Infinity,SUCCESS,TWD\n"
+                            "TXN3,C1,2026-06-10 10:00:00,-Infinity,SUCCESS,TWD\n"
+                            "TXN4,C1,2026-06-10 10:00:00,100,SUCCESS,TWD\n")
+        self.run_date("2026-06-10")
+        self.assertEqual(self.quarantine_reasons("20260610"), {
+            "TXN1": "invalid_amount", "TXN2": "invalid_amount", "TXN3": "invalid_amount",
+        })
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_blank_row_with_too_few_columns_is_skipped(self):
+        self.write_incoming("20260610", self.HEADER +
+                            "TXN1,C1,2026-06-10 10:00:00,100,SUCCESS,TWD\n"
+                            ",\n")
+        audit = self.run_date("2026-06-10")
+        self.assertEqual(audit["reconciliation"]["rows_read"], 1)
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_extra_columns_are_quarantined_unless_blank(self):
+        self.write_incoming("20260610", self.HEADER +
+                            "TXN1,C1,2026-06-10 10:00:00,100,SUCCESS,TWD,EXTRA\n"
+                            "TXN2,C1,2026-06-10 10:00:00,200,SUCCESS,TWD,\n")
+        audit = self.run_date("2026-06-10")
+        self.assertEqual(self.quarantine_reasons("20260610"), {"TXN1": "too_many_columns"})
+        self.assertTrue(audit["reconciliation"]["balanced"])
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "200")})
+
 
 if __name__ == "__main__":
     unittest.main()

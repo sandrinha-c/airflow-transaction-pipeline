@@ -12,3 +12,6 @@ __pycache__/
 # Airflow 執行產生的檔案
 logs/
 .env
+
+# Personal study notes (not part of the submission)
+NOTES.md

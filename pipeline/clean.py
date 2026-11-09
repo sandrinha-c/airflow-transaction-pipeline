@@ -41,11 +41,20 @@ def normalize_amount(value: str) -> str:
         amount = Decimal(value)
     except InvalidOperation:
         raise RowRejected("invalid_amount", f"cannot parse {value!r}") from None
+    # Decimal accepts NaN and Infinity, which would corrupt the daily total
+    if not amount.is_finite():
+        raise RowRejected("invalid_amount", f"{value!r} is not a finite number")
     # 800, 800.0 and 800.00 all become "800" so duplicates compare equal
     return format(amount.normalize(), "f")
 
 
 def clean_row(raw: dict, file_date: date, rules: dict, has_currency_column: bool) -> dict:
+    # DictReader stores cells beyond the header under the key None. A value there
+    # may mean the columns are shifted, so the amount cannot be trusted.
+    extra = [cell for cell in raw.get(None) or [] if cell.strip()]
+    if extra:
+        raise RowRejected("too_many_columns", f"unexpected extra values {extra}")
+
     value = {k.strip(): (v or "").strip() for k, v in raw.items() if k is not None}
 
     transaction_id = value.get("transaction_id", "")
@@ -93,7 +102,8 @@ def clean_file(path: Path, file_date: date, rules: dict) -> tuple[list[dict], li
         has_currency_column = "currency" in header
         # row_number is the line number in the source file (header is line 1)
         for row_number, raw in enumerate(reader, start=2):
-            if is_blank_row(list(raw.values())):
+            cells = [v for k, v in raw.items() if k is not None] + (raw.get(None) or [])
+            if is_blank_row(cells):
                 continue
             base = {"file_date": file_date.isoformat(), "row_number": row_number}
             try:

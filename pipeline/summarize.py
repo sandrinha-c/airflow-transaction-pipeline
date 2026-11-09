@@ -183,7 +183,9 @@ def build_summary(paths: Paths, file_date: date, rules: dict, run_id: str) -> di
         "summary_changes": changes,
     }
 
-    run_dir = paths.history / f"file_date={file_date:%Y%m%d}" / f"run={safe_name(run_id)}"
+    # A rerun can reuse its run_id, so the timestamp keeps every run's snapshot
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    run_dir = paths.history / f"file_date={file_date:%Y%m%d}" / f"run={safe_name(run_id)}" / f"at={stamp}"
     write_csv(run_dir / "daily_summary.csv", SUMMARY_FIELDS, summary_rows)
     write_csv(run_dir / "flagged.csv", FLAG_FIELDS, flags)
     (run_dir / "audit.json").write_text(json.dumps(audit, indent=2, ensure_ascii=False), encoding="utf-8")
