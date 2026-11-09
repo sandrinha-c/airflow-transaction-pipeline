@@ -5,7 +5,14 @@ Run from the project root:
 """
 import unittest
 
-from pipeline.dedup import DUPLICATE, ID_COLLISION, UNIQUE, VALUE_CONFLICT, classify_same_id_records
+from pipeline.dedup import (
+    DUPLICATE,
+    ID_COLLISION,
+    STATUS_UPDATE,
+    UNIQUE,
+    VALUE_CONFLICT,
+    classify_same_id_records,
+)
 
 
 def record(**overrides):
@@ -37,6 +44,24 @@ class ClassifySameIdRecordsTest(unittest.TestCase):
 
     def test_different_status_is_value_conflict(self):
         self.assertEqual(classify_same_id_records([record(status="SUCCESS"), record(status="FAILED")]), VALUE_CONFLICT)
+
+    def statuses(self, *values):
+        return classify_same_id_records([record(status=value) for value in values])
+
+    def test_pending_to_final_status_is_status_update(self):
+        self.assertEqual(self.statuses("PENDING", "SUCCESS"), STATUS_UPDATE)
+        self.assertEqual(self.statuses("PENDING", "FAILED"), STATUS_UPDATE)
+        self.assertEqual(self.statuses("PENDING", "PENDING", "SUCCESS", "SUCCESS"), STATUS_UPDATE)
+
+    def test_status_moving_backwards_or_between_finals_is_value_conflict(self):
+        self.assertEqual(self.statuses("SUCCESS", "PENDING"), VALUE_CONFLICT)
+        self.assertEqual(self.statuses("FAILED", "SUCCESS"), VALUE_CONFLICT)
+        self.assertEqual(self.statuses("PENDING", "SUCCESS", "PENDING"), VALUE_CONFLICT)
+        self.assertEqual(self.statuses("PENDING", "FAILED", "SUCCESS"), VALUE_CONFLICT)
+
+    def test_pending_to_success_with_new_amount_is_value_conflict(self):
+        records = [record(status="PENDING", amount="100"), record(status="SUCCESS", amount="200")]
+        self.assertEqual(classify_same_id_records(records), VALUE_CONFLICT)
 
     def test_different_customer_is_id_collision(self):
         self.assertEqual(classify_same_id_records([record(customer_id="C008"), record(customer_id="C999")]), ID_COLLISION)

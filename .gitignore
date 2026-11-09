@@ -10,7 +10,9 @@ __pycache__/
 .venv/
 
 # Airflow 執行產生的檔案
-logs/
+# logs/ 需事先存在，否則 Docker 會以 root 建立，Airflow 無法寫入
+logs/*
+!logs/.gitkeep
 .env
 
 # Personal study notes (not part of the submission)

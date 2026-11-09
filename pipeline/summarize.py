@@ -13,6 +13,8 @@ from pipeline.dedup import (
     DUPLICATE,
     ID_COLLISION,
     ID_COLLISION_OUTSIDE_WINDOW,
+    PENDING,
+    STATUS_UPDATE,
     UNIQUE,
     VALUE_CONFLICT,
     classify_same_id_records,
@@ -88,7 +90,13 @@ def resolve(records: list[dict], rules: dict) -> tuple[dict, list[dict]]:
                 dispositions[row_key(v)] = CONFLICT
                 conflicts.append({**{k: v[k] for k in CONFLICT_FIELDS if k in v}, "kind": kind})
             continue
-        if kind not in (UNIQUE, DUPLICATE):
+        if kind == STATUS_UPDATE:
+            # The PENDING records were never counted; the final status decides below
+            for v in same_id:
+                if v["status"] == PENDING:
+                    dispositions[row_key(v)] = NON_SUCCESS
+            same_id = [v for v in same_id if v["status"] != PENDING]
+        elif kind not in (UNIQUE, DUPLICATE):
             raise ValueError(f"classify_same_id_records returned unexpected value {kind!r} for {transaction_id}")
         # Keep the earliest received record; later identical copies are duplicates
         first, *rest = same_id

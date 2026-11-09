@@ -246,6 +246,50 @@ class RuleTest(PipelineTestCase):
         self.assertEqual(self.summary(), {"2026-06-12": (1, "70")})
         self.assertEqual(self.conflicts(), [("2026-06-10", "id_collision"), ("2026-06-12", "id_collision")])
 
+    def deliver_status(self, file_date, status):
+        return self.deliver_rows(file_date, f"T1,C1,2026-06-10 10:00:00,100,{status},TWD")
+
+    def deliver_rows(self, file_date, *rows):
+        self.write_incoming(file_date, self.HEADER + "".join(f"{row}\n" for row in rows))
+        return self.run_date(f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:]}")
+
+    def test_pending_then_success_is_counted_on_transaction_date(self):
+        self.deliver_status("20260610", "PENDING")
+        self.assertEqual(self.summary(), {})
+        audit = self.deliver_status("20260611", "SUCCESS")
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+        self.assertEqual(self.conflicts(), [])
+        rec = audit["reconciliation"]
+        self.assertEqual((rec["counted"], rec["conflict_quarantined"], rec["balanced"]), (1, 0, True))
+
+    def test_pending_then_success_is_order_independent_and_rerunnable(self):
+        self.deliver_status("20260611", "SUCCESS")
+        audit = self.deliver_status("20260610", "PENDING")
+        self.assertEqual(audit["reconciliation"]["non_success"], 1)
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+        self.run_date("2026-06-11", run_id="rerun")
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_pending_then_failed_is_not_counted(self):
+        self.deliver_status("20260610", "PENDING")
+        self.deliver_status("20260611", "FAILED")
+        self.assertEqual(self.summary(), {})
+        self.assertEqual(self.conflicts(), [])
+
+    def test_success_then_failed_quarantines_both(self):
+        self.deliver_status("20260610", "SUCCESS")
+        self.deliver_status("20260611", "FAILED")
+        self.assertEqual(self.summary(), {})
+        self.assertEqual(self.conflicts(), [("2026-06-10", "value_conflict"), ("2026-06-11", "value_conflict")])
+
+    def test_resent_corrected_amount_clears_conflict(self):
+        self.deliver_rows("20260610", "T1,C1,2026-06-10 10:00:00,1100,SUCCESS,TWD")
+        self.deliver_rows("20260611", "T1,C1,2026-06-10 10:00:00,1200,SUCCESS,TWD")
+        self.assertEqual(self.summary(), {})
+        self.deliver_rows("20260610", "T1,C1,2026-06-10 10:00:00,1200,SUCCESS,TWD")
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "1200")})
+        self.assertEqual(self.conflicts(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
