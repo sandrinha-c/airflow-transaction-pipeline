@@ -191,6 +191,61 @@ class RuleTest(PipelineTestCase):
         self.assertTrue(audit["reconciliation"]["balanced"])
         self.assertEqual(self.summary(), {"2026-06-10": (1, "200")})
 
+    def deliver(self, file_date, *rows):
+        self.write_incoming(file_date, self.HEADER + "".join(f"{row},SUCCESS,TWD\n" for row in rows))
+        return self.run_date(f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:]}")
+
+    def test_resent_file_without_its_own_date_removes_stale_total(self):
+        self.deliver("20260610", "A1,C1,2026-06-10 10:00:00,100")
+        self.deliver("20260611", "A2,C1,2026-06-11 10:00:00,70")
+        self.deliver("20260611", "A9,C1,2026-06-10 12:00:00,5")
+        self.assertEqual(self.summary(), {"2026-06-10": (2, "105")})
+
+    def test_resent_file_recomputes_its_date_from_other_files(self):
+        self.deliver("20260610", "A1,C1,2026-06-10 10:00:00,100")
+        self.deliver("20260611", "A2,C1,2026-06-11 10:00:00,70")
+        self.deliver("20260612", "A3,C1,2026-06-12 10:00:00,30", "A4,C1,2026-06-11 22:00:00,1")
+        self.deliver("20260611", "A5,C1,2026-06-10 12:00:00,5")
+        self.assertEqual(self.summary(), {
+            "2026-06-10": (2, "105"),
+            "2026-06-11": (1, "1"),
+            "2026-06-12": (1, "30"),
+        })
+
+    def test_resent_file_removes_earlier_date_that_lost_all_rows(self):
+        self.deliver("20260609", "A1,C1,2026-06-09 10:00:00,100")
+        self.deliver("20260611", "A2,C1,2026-06-10 12:00:00,70", "A3,C1,2026-06-11 10:00:00,30")
+        self.deliver("20260611", "A3,C1,2026-06-11 10:00:00,30")
+        self.assertEqual(self.summary(), {"2026-06-09": (1, "100"), "2026-06-11": (1, "30")})
+
+    OLD_RECORD = ("20260610", "TXN1,C1,2026-06-10 10:00:00,500")
+    NEW_RECORD = ("20260618", "TXN1,C2,2026-06-17 10:00:00,300", "TXN2,C1,2026-06-18 10:00:00,70")
+
+    def conflicts(self):
+        with open(self.paths.quarantine / "conflicts.csv", newline="", encoding="utf-8") as f:
+            return [(r["file_date"], r["kind"]) for r in csv.DictReader(f)]
+
+    def test_id_collision_outside_window_keeps_old_record(self):
+        self.deliver(*self.OLD_RECORD)
+        audit = self.deliver(*self.NEW_RECORD)
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "500"), "2026-06-18": (1, "70")})
+        self.assertEqual(self.conflicts(), [("2026-06-18", "id_collision_outside_window")])
+        self.assertEqual(audit["conflicts_involving_this_file"], ["TXN1"])
+        rec = audit["reconciliation"]
+        self.assertEqual((rec["counted"], rec["conflict_quarantined"], rec["balanced"]), (1, 1, True))
+
+    def test_id_collision_outside_window_is_order_independent(self):
+        self.deliver(*self.NEW_RECORD)
+        self.deliver(*self.OLD_RECORD)
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "500"), "2026-06-18": (1, "70")})
+        self.assertEqual(self.conflicts(), [("2026-06-18", "id_collision_outside_window")])
+
+    def test_id_collision_inside_window_quarantines_both(self):
+        self.deliver("20260610", "TXN1,C1,2026-06-10 10:00:00,500")
+        self.deliver("20260612", "TXN1,C2,2026-06-11 10:00:00,300", "TXN2,C1,2026-06-12 10:00:00,70")
+        self.assertEqual(self.summary(), {"2026-06-12": (1, "70")})
+        self.assertEqual(self.conflicts(), [("2026-06-10", "id_collision"), ("2026-06-12", "id_collision")])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -5,11 +5,18 @@ import csv
 import json
 import re
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from pipeline.clean import write_csv
-from pipeline.dedup import DUPLICATE, ID_COLLISION, UNIQUE, VALUE_CONFLICT, classify_same_id_records
+from pipeline.dedup import (
+    DUPLICATE,
+    ID_COLLISION,
+    ID_COLLISION_OUTSIDE_WINDOW,
+    UNIQUE,
+    VALUE_CONFLICT,
+    classify_same_id_records,
+)
 from pipeline.settings import Paths, rules_fingerprint
 
 SUMMARY_FIELDS = ["transaction_date", "transaction_count", "total_amount"]
@@ -42,6 +49,23 @@ def row_key(record: dict) -> tuple[str, int]:
     return record["file_date"], record["row_number"]
 
 
+def split_outside_window(same_id: list[dict], rules: dict) -> tuple[list[dict], list[dict]]:
+    """Separate records whose file is too new to affect the oldest record with the same id.
+
+    A file may only change dates inside its late-arrival window, so an older record stays
+    settled and only the newer colliding record is quarantined. This depends only on staged
+    dates, never on processing order, so backfills in any order give the same result.
+    """
+    max_days = rules["late_arrival"]["max_days_before_file_date"]
+    oldest = min(r["transaction_date"] for r in same_id)
+    inside, outside = [], []
+    for record in same_id:
+        window_start = date.fromisoformat(record["file_date"]) - timedelta(days=max_days)
+        is_outside = record["transaction_date"] != oldest and oldest < window_start.isoformat()
+        (outside if is_outside else inside).append(record)
+    return inside, outside
+
+
 def resolve(records: list[dict], rules: dict) -> tuple[dict, list[dict]]:
     """Give every staged record exactly one disposition. Returns (dispositions, conflict rows)."""
     by_id: dict[str, list[dict]] = defaultdict(list)
@@ -53,6 +77,11 @@ def resolve(records: list[dict], rules: dict) -> tuple[dict, list[dict]]:
     allowed_status = set(rules["status"]["allowed"])
 
     for transaction_id, same_id in by_id.items():
+        same_id, outside_window = split_outside_window(same_id, rules)
+        for v in outside_window:
+            dispositions[row_key(v)] = CONFLICT
+            conflicts.append({**{k: v[k] for k in CONFLICT_FIELDS if k in v}, "kind": ID_COLLISION_OUTSIDE_WINDOW})
+
         kind = UNIQUE if len(same_id) == 1 else classify_same_id_records(same_id)
         if kind in (VALUE_CONFLICT, ID_COLLISION):
             for v in same_id:
@@ -136,16 +165,18 @@ def build_summary(paths: Paths, file_date: date, rules: dict, run_id: str) -> di
     if not reconciliation["balanced"]:
         raise ReconciliationError(f"rows_read={meta['data_rows']} but rows accounted for={accounted}: {buckets}")
 
-    # 2. Affected dates: dates touched by this file (including other records with the same ids)
-    #    plus the previous N trading days
+    # 2. Affected dates: the file date, dates touched by this file (including other records
+    #    with the same ids), and the previous N trading days. The file date is always included
+    #    and published dates count as trading days, so a resent file that removes a date's
+    #    last rows also removes that date's old total.
+    before = read_summary(paths)
     current_ids = {r["transaction_id"] for r in current}
     involved = {r["transaction_date"] for r in records if r["transaction_id"] in current_ids}
-    lookback = previous_trading_days({r["transaction_date"] for r in counted}, file_date,
+    lookback = previous_trading_days({r["transaction_date"] for r in counted} | set(before), file_date,
                                      rules["lookback"]["trading_days"])
-    affected = involved | set(lookback)
+    affected = involved | set(lookback) | {file_date.isoformat()}
 
     # 3. Recompute affected dates from scratch and merge into the published summary
-    before = read_summary(paths)
     recomputed = summarize_dates(counted, affected)
     after = {d: row for d, row in before.items() if d not in affected}
     after.update(recomputed)

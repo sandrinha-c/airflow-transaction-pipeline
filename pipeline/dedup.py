@@ -14,6 +14,8 @@ UNIQUE = "unique"
 DUPLICATE = "duplicate"
 VALUE_CONFLICT = "value_conflict"
 ID_COLLISION = "id_collision"
+# A newer record collides with one older than its file's late-arrival window
+ID_COLLISION_OUTSIDE_WINDOW = "id_collision_outside_window"
 
 
 def classify_same_id_records(records: list[dict]) -> str:
