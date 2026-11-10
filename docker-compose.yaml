@@ -1,13 +1,6 @@
-# Airflow 2.x runtime: LocalExecutor + PostgreSQL metadata DB
-#
-# Quick start (see README for details):
-#   echo "AIRFLOW_UID=$(id -u)" > .env
-#   docker compose up airflow-init
-#   docker compose up -d
-#   open http://localhost:8080  (airflow / airflow)
+# Airflow 2.x runtime: LocalExecutor + PostgreSQL metadata DB. Startup steps: see README.
 
 x-airflow-common: &airflow-common
-  # Pin the exact version for reproducible environments
   image: apache/airflow:2.10.5-python3.11
   user: "${AIRFLOW_UID:-50000}:0"
   environment: &airflow-common-env

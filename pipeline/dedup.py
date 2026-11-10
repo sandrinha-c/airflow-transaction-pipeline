@@ -47,11 +47,10 @@ def classify_same_id_records(records: list[dict]) -> str:
         ID_COLLISION    some identity field differs: likely two different transactions
                         sharing one id
     """
-    if len(records)== 1:
+    if len(records) == 1:
         return UNIQUE
-    
+
     first = records[0]
-        
     for record in records[1:]:
         for field in IDENTITY_FIELDS:
             if record[field] != first[field]:
@@ -66,8 +65,3 @@ def classify_same_id_records(records: list[dict]) -> str:
     if len(set(statuses)) == 1:
         return DUPLICATE
     return STATUS_UPDATE if is_pending_then_final(statuses) else VALUE_CONFLICT
-
-    
-            
-
-    

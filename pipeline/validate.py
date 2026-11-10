@@ -33,7 +33,6 @@ def select_contract(rules: dict, file_date: date) -> dict:
 
 
 def is_blank_row(row: list[str | None]) -> bool:
-    # DictReader fills missing cells with None when a row is shorter than the header
     return not any((cell or "").strip() for cell in row)
 
 

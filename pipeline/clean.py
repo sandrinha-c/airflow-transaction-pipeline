@@ -49,8 +49,7 @@ def normalize_amount(value: str) -> str:
 
 
 def clean_row(raw: dict, file_date: date, rules: dict, has_currency_column: bool) -> dict:
-    # DictReader stores cells beyond the header under the key None. A value there
-    # may mean the columns are shifted, so the amount cannot be trusted.
+    # Values beyond the header may mean shifted columns, so the amount cannot be trusted
     extra = [cell for cell in raw.get(None) or [] if cell.strip()]
     if extra:
         raise RowRejected("too_many_columns", f"unexpected extra values {extra}")
