@@ -1,10 +1,10 @@
 {
   "run_id": "backfill__2026-05-31T16:30:00+00:00",
   "file_date": "2026-06-01",
-  "generated_at": "2026-11-10T15:41:48+00:00",
+  "generated_at": "2026-11-10T15:51:55+00:00",
   "rules": {
     "version": 1,
-    "fingerprint": "7284dbe1b35b"
+    "fingerprint": "338273251977"
   },
   "source": {
     "file": "transactions_20260601.csv",
@@ -12,7 +12,7 @@
     "sha256": "1b0586b2830b6a3ca01c74d447579b0103016e2e53d09592a89a7a6354341dd8",
     "contract_version": "v1",
     "data_rows": 7,
-    "arrived_at": "2026-11-10T23:41:41+08:00",
+    "arrived_at": "2026-11-10T23:51:49+08:00",
     "transaction_time_range": {
       "earliest": "2026-06-01 09:10:00",
       "latest": "2026-06-01 14:40:00"
