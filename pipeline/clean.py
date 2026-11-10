@@ -81,6 +81,12 @@ def clean_row(raw: dict, file_date: date, rules: dict, has_currency_column: bool
     if currency not in rules["currency"]["allowed"]:
         raise RowRejected("currency_not_allowed", f"{currency} is not in {rules['currency']['allowed']}")
 
+    status = value.get("status", "").upper()
+    if not status:
+        raise RowRejected("missing_status", "status is empty")
+    if status not in rules["status"]["known"]:
+        raise RowRejected("unknown_status", f"{status} is not in {rules['status']['known']}")
+
     return {
         "transaction_id": transaction_id,
         "customer_id": value.get("customer_id", ""),
@@ -88,7 +94,7 @@ def clean_row(raw: dict, file_date: date, rules: dict, has_currency_column: bool
         "transaction_date": txn_date.isoformat(),
         "amount": amount,
         "currency": currency,
-        "status": value.get("status", "").upper(),
+        "status": status,
     }
 
 
@@ -99,8 +105,10 @@ def clean_file(path: Path, file_date: date, rules: dict) -> tuple[list[dict], li
         reader = csv.DictReader(f)
         header = [h.strip() for h in reader.fieldnames or []]
         has_currency_column = "currency" in header
-        # row_number is the line number in the source file (header is line 1)
-        for row_number, raw in enumerate(reader, start=2):
+        for raw in reader:
+            # Line number in the source file (header is line 1). Counting rows instead would
+            # drift after a blank line, which DictReader skips.
+            row_number = reader.line_num
             cells = [v for k, v in raw.items() if k is not None] + (raw.get(None) or [])
             if is_blank_row(cells):
                 continue

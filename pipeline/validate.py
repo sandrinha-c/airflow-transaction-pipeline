@@ -88,6 +88,12 @@ def validate_file(path: Path, file_date: date, rules: dict) -> dict:
     if checks["require_data_rows"] and data_rows == 0:
         raise FileValidationError(f"{path.name}: file contains a header but no data rows")
 
+    duplicated = sorted({col for col in header if header.count(col) > 1})
+    if duplicated:
+        raise FileValidationError(
+            f"{path.name}: duplicated columns {duplicated}; cannot tell which value to use"
+        )
+
     contract = select_contract(rules, file_date)
     known = set(contract["required"]) | set(contract["optional"])
     missing = [col for col in contract["required"] if col not in header]

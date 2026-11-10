@@ -28,8 +28,15 @@ transaction_time:
     - "%Y/%m/%d %H:%M:%S"
 
 status:
+  # Counted in the summary
   allowed:
     - SUCCESS
+  # Every status the source is known to send. Anything else (a typo, an empty value)
+  # is quarantined, so a successful transaction is never dropped without a warning.
+  known:
+    - SUCCESS
+    - FAILED
+    - PENDING
 
 currency:
   allowed:

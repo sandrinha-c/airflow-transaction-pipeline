@@ -193,6 +193,35 @@ class RuleTest(PipelineTestCase):
         self.assertTrue(audit["reconciliation"]["balanced"])
         self.assertEqual(self.summary(), {"2026-06-10": (1, "200")})
 
+    def test_unknown_or_missing_status_is_quarantined(self):
+        self.write_incoming("20260610", self.HEADER +
+                            "TXN1,C1,2026-06-10 10:00:00,100,SUCESS,TWD\n"
+                            "TXN2,C1,2026-06-10 10:00:00,100,,TWD\n"
+                            "TXN3,C1,2026-06-10 10:00:00,100,failed,TWD\n"
+                            "TXN4,C1,2026-06-10 10:00:00,100,success,TWD\n")
+        audit = self.run_date("2026-06-10")
+        self.assertEqual(self.quarantine_reasons("20260610"), {
+            "TXN1": "unknown_status", "TXN2": "missing_status",
+        })
+        rec = audit["reconciliation"]
+        self.assertEqual((rec["row_quarantined"], rec["non_success"], rec["counted"]), (2, 1, 1))
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_duplicated_column_fails(self):
+        self.write_incoming("20260610", self.HEADER.strip() + ",amount\n"
+                                        "TXN1,C1,2026-06-10 10:00:00,100,SUCCESS,TWD,99999\n")
+        with self.assertRaisesRegex(FileValidationError, "duplicated columns \['amount'\]"):
+            self.run_date("2026-06-10")
+
+    def test_row_number_is_source_line_after_blank_line(self):
+        self.write_incoming("20260610", self.HEADER +
+                            "TXN1,C1,2026-06-10 10:00:00,100,SUCCESS,TWD\n"
+                            "\n"
+                            "TXN2,C1,2026-06-10 10:00:00,,SUCCESS,TWD\n")
+        self.run_date("2026-06-10")
+        with open(self.paths.quarantine / "file_date=20260610.csv", newline="", encoding="utf-8") as f:
+            self.assertEqual([(r["transaction_id"], r["row_number"]) for r in csv.DictReader(f)], [("TXN2", "4")])
+
     def deliver(self, file_date, *rows):
         self.write_incoming(file_date, self.HEADER + "".join(f"{row},SUCCESS,TWD\n" for row in rows))
         return self.run_date(f"{file_date[:4]}-{file_date[4:6]}-{file_date[6:]}")
