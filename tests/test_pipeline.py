@@ -5,12 +5,14 @@ Run from the project root:
 """
 import csv
 import json
+import os
 import shutil
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
+from pipeline.run_date import TAIPEI
 from pipeline.runner import run_for_date
 from pipeline.settings import PROJECT_ROOT, Paths, load_rules
 from pipeline.validate import FileValidationError
@@ -289,6 +291,57 @@ class RuleTest(PipelineTestCase):
         self.deliver_rows("20260610", "T1,C1,2026-06-10 10:00:00,1200,SUCCESS,TWD")
         self.assertEqual(self.summary(), {"2026-06-10": (1, "1200")})
         self.assertEqual(self.conflicts(), [])
+
+
+class FileArrivalTest(PipelineTestCase):
+    """File X covers transactions up to its arrival time; dates outside X-2..X are quarantined."""
+
+    HEADER = RuleTest.HEADER
+
+    def deliver_at(self, arrived, *rows):
+        """Write file 2026-06-10 with the given arrival (modified) time in UTC+8, then run it."""
+        path = self.paths.incoming / "transactions_20260610.csv"
+        path.write_text(self.HEADER + "".join(f"{row},SUCCESS,TWD\n" for row in rows), encoding="utf-8")
+        ts = datetime.fromisoformat(arrived).replace(tzinfo=TAIPEI).timestamp()
+        os.utime(path, (ts, ts))
+        return self.run_date("2026-06-10")
+
+    def test_transaction_after_arrival_is_flagged_and_counted(self):
+        audit = self.deliver_at("2026-06-10 14:00:00",
+                                "T1,C1,2026-06-10 13:59:59,100",
+                                "T2,C1,2026-06-10 15:00:00,200")
+        self.assertEqual(audit["flags"], {"transaction_after_file_arrival": 1})
+        self.assertEqual(self.summary(), {"2026-06-10": (2, "300")})
+        self.assertEqual(audit["source"]["arrived_at"], "2026-06-10T14:00:00+08:00")
+        self.assertEqual(audit["source"]["transaction_time_range"],
+                         {"earliest": "2026-06-10 13:59:59", "latest": "2026-06-10 15:00:00"})
+        with open(Path(audit["audit_path"]).parent / "flagged.csv", newline="", encoding="utf-8") as f:
+            self.assertEqual([(r["flag"], r["transaction_id"], r["transaction_time"]) for r in csv.DictReader(f)],
+                             [("transaction_after_file_arrival", "T2", "2026-06-10 15:00:00")])
+
+    def test_transaction_before_arrival_is_not_flagged(self):
+        audit = self.deliver_at("2026-06-11 00:00:00", "T1,C1,2026-06-10 23:59:59,100")
+        self.assertEqual(audit["flags"], {})
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_rerun_gives_same_flags(self):
+        first = self.deliver_at("2026-06-10 14:00:00", "T1,C1,2026-06-10 15:00:00,100")
+        second = self.deliver_at("2026-06-10 14:00:00", "T1,C1,2026-06-10 15:00:00,100")
+        self.assertEqual(first["flags"], second["flags"])
+        self.assertEqual(self.summary(), {"2026-06-10": (1, "100")})
+
+    def test_date_window_boundaries(self):
+        audit = self.deliver_at("2026-06-11 00:00:00",
+                                "T1,C1,2026-06-10 23:59:59,100",   # X, last second: counted
+                                "T2,C1,2026-06-11 00:00:00,100",   # X+1, first second: future
+                                "T3,C1,2026-06-08 00:00:00,100",   # X-2, first second: counted
+                                "T4,C1,2026-06-07 23:59:59,100")   # X-3, last second: too old
+        self.assertEqual(self.quarantine_reasons("20260610"), {
+            "T2": "transaction_date_in_future",
+            "T4": "transaction_date_too_old",
+        })
+        self.assertEqual(self.summary(), {"2026-06-08": (1, "100"), "2026-06-10": (1, "100")})
+        self.assertEqual(audit["flags"], {})
 
 
 if __name__ == "__main__":

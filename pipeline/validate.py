@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import csv
 import hashlib
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from pipeline.run_date import TAIPEI
 from pipeline.settings import Paths
 
 
@@ -13,8 +14,38 @@ class FileValidationError(Exception):
     """The file cannot be used at all (too small, no data, or schema contract violated)."""
 
 
+class FileMissingError(Exception):
+    """The file did not arrive before the run's deadline."""
+
+
 def source_file_path(paths: Paths, file_date: date) -> Path:
     return paths.incoming / f"transactions_{file_date:%Y%m%d}.csv"
+
+
+def file_deadline(logical_date: datetime, timeout_seconds: int) -> datetime:
+    """Latest time to wait for the file: the run's scheduled time plus the timeout.
+
+    It is based on the schedule, not on when the run starts, so a backfill of an old
+    date whose file never arrived fails at once instead of waiting the full timeout.
+    """
+    return logical_date + timedelta(seconds=timeout_seconds)
+
+
+def check_file_arrived(path: Path, now: datetime, deadline: datetime) -> bool:
+    """True if the file exists, False to keep waiting, FileMissingError once the deadline has passed."""
+    if path.exists():
+        return True
+    if now >= deadline:
+        raise FileMissingError(
+            f"{path.name} not found in {path.parent}; "
+            f"deadline {deadline.astimezone(TAIPEI):%Y-%m-%d %H:%M} (UTC+8) has passed"
+        )
+    return False
+
+
+def file_arrived_at(path: Path) -> str:
+    """When the file landed, from its modified time, in UTC+8."""
+    return datetime.fromtimestamp(path.stat().st_mtime, TAIPEI).isoformat(timespec="seconds")
 
 
 def file_sha256(path: Path) -> str:
@@ -73,6 +104,7 @@ def validate_file(path: Path, file_date: date, rules: dict) -> dict:
         "file_date": file_date.isoformat(),
         "size_bytes": size,
         "sha256": file_sha256(path),
+        "arrived_at": file_arrived_at(path),
         "header": header,
         "data_rows": data_rows,
         "contract_version": contract["version"],

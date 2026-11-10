@@ -24,7 +24,8 @@ from pipeline.settings import Paths, rules_fingerprint
 SUMMARY_FIELDS = ["transaction_date", "transaction_count", "total_amount"]
 CONFLICT_FIELDS = ["transaction_id", "kind", "file_date", "row_number", "customer_id",
                    "transaction_time", "amount", "currency", "status"]
-FLAG_FIELDS = ["flag", "file_date", "row_number", "transaction_id", "transaction_date", "amount", "customer_id"]
+FLAG_FIELDS = ["flag", "file_date", "row_number", "transaction_id", "transaction_date", "transaction_time",
+               "amount", "customer_id"]
 
 COUNTED = "counted"
 DEDUPLICATED = "deduplicated"
@@ -134,8 +135,11 @@ def read_summary(paths: Paths) -> dict[str, dict]:
         return {row["transaction_date"]: row for row in csv.DictReader(f)}
 
 
-def collect_flags(records: list[dict], rules: dict) -> list[dict]:
+def collect_flags(records: list[dict], rules: dict, arrived_at: str | None = None) -> list[dict]:
+    """Rows counted as normal but worth a review. arrived_at is the file's arrival time (UTC+8 ISO)."""
     enabled = rules.get("flags", {})
+    # transaction_time is naive UTC+8, so compare it with the arrival time in UTC+8 without the offset
+    arrival = datetime.fromisoformat(arrived_at).replace(tzinfo=None) if arrived_at else None
     flags = []
     for r in records:
         amount = Decimal(r["amount"])
@@ -146,6 +150,10 @@ def collect_flags(records: list[dict], rules: dict) -> list[dict]:
             found.append("zero_amount")
         if enabled.get("missing_customer_id") and not r["customer_id"]:
             found.append("missing_customer_id")
+        # A transaction cannot happen after the file containing it was delivered
+        if (enabled.get("transaction_after_file_arrival") and arrival
+                and datetime.strptime(r["transaction_time"], "%Y-%m-%d %H:%M:%S") > arrival):
+            found.append("transaction_after_file_arrival")
         for flag in found:
             flags.append({"flag": flag, **{k: r[k] for k in FLAG_FIELDS if k in r}})
     return flags
@@ -203,7 +211,9 @@ def build_summary(paths: Paths, file_date: date, rules: dict, run_id: str) -> di
     write_csv(paths.output / "daily_summary.csv", SUMMARY_FIELDS, summary_rows)
     write_csv(paths.quarantine / "conflicts.csv", CONFLICT_FIELDS, conflicts)
 
-    flags = collect_flags([r for r in current if dispositions[row_key(r)] == COUNTED], rules)
+    flags = collect_flags([r for r in current if dispositions[row_key(r)] == COUNTED], rules,
+                          meta.get("arrived_at"))
+    times = sorted(r["transaction_time"] for r in current)
     current_conflicts = sorted({c["transaction_id"] for c in conflicts if c["transaction_id"] in current_ids})
 
     audit = {
@@ -211,7 +221,12 @@ def build_summary(paths: Paths, file_date: date, rules: dict, run_id: str) -> di
         "file_date": file_date.isoformat(),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "rules": {"version": rules.get("version"), "fingerprint": rules_fingerprint(rules)},
-        "source": {k: meta[k] for k in ("file", "size_bytes", "sha256", "contract_version", "data_rows")},
+        "source": {
+            **{k: meta[k] for k in ("file", "size_bytes", "sha256", "contract_version", "data_rows")},
+            # Files staged before arrival tracking have no arrived_at
+            "arrived_at": meta.get("arrived_at"),
+            "transaction_time_range": {"earliest": times[0], "latest": times[-1]} if times else None,
+        },
         "archived_previous_version": meta.get("archived_previous_version"),
         "reconciliation": reconciliation,
         "row_quarantine_reasons": meta["row_quarantine_reasons"],

@@ -7,14 +7,21 @@ from __future__ import annotations
 
 import pendulum
 from airflow.decorators import dag, task
+from airflow.exceptions import AirflowFailException
 from airflow.timetables.trigger import CronTriggerTimetable
 
-from pipeline.alerts import send_alert
+from pipeline.alerts import send_alert, task_failure_details
 from pipeline.clean import clean_file, stage_file
 from pipeline.run_date import file_date_from
 from pipeline.settings import get_paths, load_rules
 from pipeline.summarize import build_summary
-from pipeline.validate import source_file_path, validate_file
+from pipeline.validate import (
+    FileMissingError,
+    check_file_arrived,
+    file_deadline,
+    source_file_path,
+    validate_file,
+)
 
 RULES = load_rules()
 PATHS = get_paths()
@@ -22,20 +29,8 @@ TAIPEI = "Asia/Taipei"
 
 
 def alert_on_failure(context: dict) -> None:
-    ti = context["task_instance"]
-    send_alert(
-        "ERROR",
-        f"Task failed: {ti.dag_id}.{ti.task_id}",
-        {
-            "dag_id": ti.dag_id,
-            "task_id": ti.task_id,
-            "run_id": context["run_id"],
-            "file_date": str(file_date_from(context)),
-            "try_number": ti.try_number,
-            "error": repr(context.get("exception")),
-            "log_url": ti.log_url,
-        },
-    )
+    details = task_failure_details(context, PATHS)
+    send_alert("ERROR", f"Task failed: {details['dag_id']}.{details['task_id']}", details)
 
 
 @dag(
@@ -59,7 +54,13 @@ def daily_transactions():
         mode="reschedule",
     )
     def wait_for_file(**context) -> bool:
-        return source_file_path(PATHS, file_date_from(context)).exists()
+        deadline = file_deadline(context["logical_date"], RULES["file_sensor"]["timeout_seconds"])
+        try:
+            return check_file_arrived(source_file_path(PATHS, file_date_from(context)),
+                                      pendulum.now("UTC"), deadline)
+        except FileMissingError as missing:
+            # Fail without retrying; the failure callback sends the alert
+            raise AirflowFailException(str(missing)) from missing
 
     @task
     def validate(**context) -> dict:

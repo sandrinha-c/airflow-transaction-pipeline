@@ -44,7 +44,7 @@ wait_for_file → validate → clean_and_stage → summarize → report
 
 | Task | 工作內容 | 程式 |
 |---|---|---|
-| `wait_for_file` | 等待當日檔案，每 5 分鐘檢查一次，最多等 2 小時 | `dags/daily_transactions.py` |
+| `wait_for_file` | 等待當日檔案，每 5 分鐘檢查一次，最晚等到排程時間加 2 小時（00:30 → 02:30），逾時則失敗並告警 | `dags/daily_transactions.py`、`pipeline/validate.py` |
 | `validate` | 檔案大小、資料列、欄位合約，不符合則判定失敗 | `pipeline/validate.py` |
 | `clean_and_stage` | 逐筆清洗，不合格的資料列隔離並附上原因 | `pipeline/clean.py` |
 | `summarize` | 跨檔案去重、筆數對帳、重算受影響日期 | `pipeline/summarize.py`、`pipeline/dedup.py` |
@@ -110,6 +110,16 @@ docker compose exec airflow-scheduler airflow dags list-runs -d daily_transactio
 | 0604 | failed | 只有 header，沒有資料列 |
 | 0605 | failed | 檔案只有 5 bytes，小於 50 bytes |
 
+**缺檔告警測試**：06-06 沒有檔案，補跑時截止時間（06-06 02:30）早已過去，`wait_for_file` 第一次檢查就判定失敗，不會再等 2 小時。
+
+```bash
+docker compose exec airflow-scheduler airflow dags backfill daily_transactions \
+  -s 2026-06-06T00:30:00 -e 2026-06-06T00:30:00
+tail -n 1 data/alerts/alerts.jsonl
+```
+
+預期 `wait_for_file` 為 failed、後續 task 為 upstream_failed，`alerts.jsonl` 多一筆 ERROR，`task_id` 為 `wait_for_file`，`expected_file` 指向缺少的檔案。
+
 **2. 彙總結果** `data/output/daily_summary.csv`
 
 | transaction_date | transaction_count | total_amount |
@@ -142,13 +152,13 @@ python -m unittest discover -s tests -t . -v
 | `data/archive/` | 被重送檔案取代的舊版本 |
 | `data/alerts/alerts.jsonl` | 所有告警紀錄 |
 
-`audit.json` 記錄來源檔指紋、規則版本、對帳結果，以及每個日期的數字變化。
+`audit.json` 記錄來源檔指紋、到檔時間、檔內交易時間範圍、規則版本、對帳結果，以及每個日期的數字變化。
 
 ## 告警機制
 
 | 等級 | 觸發時機 | 內容 |
 |---|---|---|
-| ERROR | 任何 task 失敗 | DAG、task、run ID、檔案日期、錯誤訊息、log 連結 |
+| ERROR | 任何 task 失敗，包含缺檔逾時 | DAG、task、run ID、檔案日期、預期檔案路徑、錯誤訊息、log 連結 |
 | WARNING | run 成功，但有隔離、衝突或標記 | 對帳結果、隔離原因、衝突 ID、標記統計、數字變化、audit 路徑 |
 
 告警一律寫入 `data/alerts/alerts.jsonl` 與 Airflow log。若要同時發送到 Slack 或 Teams，請在 `docker-compose.yaml` 的 `environment` 加入 `ALERT_WEBHOOK_URL`，設為 incoming webhook 網址後重新啟動容器。

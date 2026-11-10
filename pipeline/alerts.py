@@ -11,9 +11,27 @@ import os
 import urllib.request
 from datetime import datetime, timezone
 
+from pipeline.run_date import file_date_from
 from pipeline.settings import Paths, get_paths
+from pipeline.validate import source_file_path
 
 log = logging.getLogger("pipeline.alerts")
+
+
+def task_failure_details(context: dict, paths: Paths) -> dict:
+    """What an on-call engineer needs from an Airflow failure context to start investigating."""
+    ti = context["task_instance"]
+    file_date = file_date_from(context)
+    return {
+        "dag_id": ti.dag_id,
+        "task_id": ti.task_id,
+        "run_id": context["run_id"],
+        "file_date": str(file_date),
+        "expected_file": str(source_file_path(paths, file_date)),
+        "try_number": ti.try_number,
+        "error": repr(context.get("exception")),
+        "log_url": ti.log_url,
+    }
 
 
 def send_alert(level: str, title: str, details: dict, paths: Paths | None = None) -> dict:

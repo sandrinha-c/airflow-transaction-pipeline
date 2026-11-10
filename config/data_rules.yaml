@@ -52,8 +52,11 @@ flags:
   negative_amount: true
   zero_amount: true
   missing_customer_id: true
+  # transaction_time later than the file's arrival time (its modified time, UTC+8)
+  transaction_after_file_arrival: true
 
-# How long to wait for the source file before failing the run
+# How long to wait for the source file before failing the run. The deadline is the
+# scheduled time (00:30) plus timeout_seconds, so a backfill of an old date fails at once.
 file_sensor:
   poke_interval_seconds: 300
   timeout_seconds: 7200
