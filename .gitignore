@@ -1,6 +1,3 @@
-# 與作業無關的個人文件（104 測評說明、個資告知）
-*.pdf
-
 # 原始壓縮檔（已解壓至 sample_data/）
 sample_data.zip
 
@@ -14,6 +11,3 @@ __pycache__/
 logs/*
 !logs/.gitkeep
 .env
-
-# Personal study notes (not part of the submission)
-NOTES.md
