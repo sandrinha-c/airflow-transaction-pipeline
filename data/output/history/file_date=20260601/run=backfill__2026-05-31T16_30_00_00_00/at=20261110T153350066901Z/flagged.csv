@@ -1,0 +1,3 @@
+flag,file_date,row_number,transaction_id,transaction_date,transaction_time,amount,customer_id
+missing_customer_id,2026-06-01,5,TXN0004,2026-06-01,2026-06-01 12:15:00,300,
+negative_amount,2026-06-01,6,TXN0005,2026-06-01,2026-06-01 13:00:00,-200,C004
